@@ -1,0 +1,135 @@
+stages:
+  - install
+  - build
+  - image
+  - deploy
+  - cleanup
+
+before_script:
+  - >
+    if [ "$CI_COMMIT_REF_SLUG" = "master" ];
+    then
+      export IMAGE_VERSION="master-${CI_COMMIT_SHA:0:8}";
+    else
+      export IMAGE_VERSION="branch-${CI_COMMIT_REF_SLUG}";
+    fi
+  - echo $IMAGE_VERSION
+
+# Устанавливает npm-пакеты
+install-deps:
+  tags: [2gis, docker]
+  stage: install
+  image: node:18
+  interruptible: true
+  script:
+    - npm ci
+  rules:
+    # Запустим job'у для мастера
+    - if: $CI_COMMIT_BRANCH == "master"
+    # Запустим job'у для merge_request
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - when: never
+  artifacts:
+    paths:
+      - node_modules
+
+build-demo:
+  tags: [2gis, docker]
+  stage: build
+  image: node:18
+  interruptible: true
+  script:
+    - npm run build
+  rules:
+    # Запустим job'у для мастера
+    - if: $CI_COMMIT_BRANCH == "master"
+    # Запустим job'у для merge_request
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - when: never
+  artifacts:
+    paths:
+      - dist
+
+###############
+# stage image #
+###############
+
+build-docker-images:
+  stage: image
+  needs: [build-demo]
+  interruptible: true
+  script:
+    - docker-compose build
+    - hub-tool tags:delete --path webmaps/ai-doc $IMAGE_VERSION
+    - docker-compose push ai-doc
+    - docker-compose down --rmi all
+  tags: [docker-engine]
+  rules:
+    # Запустим job'у для мастера
+    - if: $CI_COMMIT_BRANCH == "master"
+    # Запустим job'у для merge_request
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - when: never
+
+###############################################################################
+# Общая часть различных джоб, может быть переспользовано в рамках разных джоб #
+###############################################################################
+
+.deploy-image:
+  tags: [2gis, docker]
+  stage: deploy
+  image: docker-hub.2gis.ru/2gis-io/k8s-handle:latest
+  dependencies: []
+
+.deploy-ai-doc:
+  extends: [.deploy-image]
+  script:
+    - cd deploy/ai-doc
+    - k8s-handle deploy --section staging --sync-mode --strict
+
+# Деплой docker-образа в K8S, обновление демки для merge-request'а
+ai-doc:
+  needs: [build-docker-images]
+  extends: [.deploy-ai-doc]
+  environment:
+    name: branch/$CI_COMMIT_REF_SLUG
+    url: "https://ai-doc-$CI_COMMIT_REF_SLUG.web-staging.2gis.ru"
+    on_stop: delete-ai-doc
+  variables:
+    NAME: "ai-doc-$CI_COMMIT_REF_SLUG"
+  interruptible: true
+  only: [merge_requests]
+
+#################
+# stage cleanup #
+#################
+
+# Удаляем из docker-хаба неиспользуемый docker-образ
+clean-docker-master:
+  only: [master]
+  variables:
+    GIT_STRATEGY: none
+  dependencies: []
+  stage: cleanup
+  tags: [docker-engine]
+  interruptible: true
+  script:
+    - hub-tool tags:cleanup --path webmaps/ai-doc --regexp 'master-.*' --count 5
+
+# Удаление из docker-хаба образа из merge-request'а
+# Удаление задеплоенной версии со staging'а K8S, освобождаем ресурсы
+delete-ai-doc:
+  tags: [docker-engine]
+  stage: cleanup
+  when: manual
+  environment:
+    name: branch/$CI_COMMIT_REF_SLUG
+    action: stop
+  variables:
+    GIT_STRATEGY: none
+  dependencies: []
+  interruptible: true
+  script:
+    - hub-tool tags:delete --path webmaps/ai-doc $IMAGE_VERSION
+    - kubectl delete deploy,svc ai-doc-$CI_COMMIT_REF_SLUG
+  only: [merge_requests]

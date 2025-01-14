@@ -1,0 +1,11 @@
+version: '3'
+services:
+  ai-doc:
+    build:
+      context: .
+      dockerfile: deploy/ai-doc/Dockerfile
+      args:
+        container_version: ${IMAGE_VERSION:-latest}
+    ports:
+      - "8080:8080"
+    image: docker-hub.2gis.ru/webmaps/ai-doc:${IMAGE_VERSION:-latest}

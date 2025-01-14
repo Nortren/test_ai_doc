@@ -1,0 +1,23 @@
+---
+common:
+  k8s_master_uri: "https://master.k8s.2gis.dev:6443"
+  k8s_token: "{{ env='K8S_TOKEN' }}"
+  k8s_namespace: webmaps
+
+  app_name: "{{ env='NAME' }}"
+  app_port: 8080 # Порт, на котором слушает приложение в контейнере, для nginx это 80, для node, java, python, go это обычно 3000, 5000, 8000 итд
+
+  replicas_count: 1
+  image_path: docker-hub.2gis.ru/webmaps/ai-doc
+  image_version: "{{ env='IMAGE_VERSION' }}"
+  job_id: "{{ env='CI_JOB_ID' }}"
+
+  requests_cpu: 1m
+  limits_cpu: 2m
+  requests_memory: 16M
+  limits_memory: 20M
+
+staging:
+  kubectl:
+  - template: deployment.yaml.j2
+  - template: service.yaml.j2

@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment {# https://kubernetes.io/docs/user-guide/deployments #}
+metadata:
+  name: {{ app_name }}
+spec:
+  replicas: {{ replicas_count }}
+  revisionHistoryLimit: {{ revision_history_limit | default('3') }}  {# https://kubernetes.io/docs/user-guide/deployments/#revision-history-limit  #}
+  selector:
+    matchLabels:
+      app: {{ app_name }}
+  strategy:
+    rollingUpdate:
+      maxUnavailable: {{ max_unavailable | default('0') }}
+      maxSurge: {{ max_surge | default('1') }}
+  template:
+    metadata:
+      labels:
+        app: {{ app_name }}  {# Будем маркировать приложение вот этим лейблом, для того чтобы потом инстансы мог найти сервис #}
+    spec:
+      terminationGracePeriodSeconds: {{ termination_grace_period_seconds | default('60') }}  {# Секунды между SIGTERM и SIGKILL #}
+      nodeSelector:
+        role: worker
+      containers: {# Описание контейнеров в поде https://kubernetes.io/docs/user-guide/pods/ #}
+      - name: {{ app_name }}
+        image: {{ image_path }}:{{ image_version }}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: {{ app_port }}  {# Порт на котором будет стартовать сервис, nginx стартует на 80 и 443, но для простоты 443 мы не указываем #}
+        resources:  {# https://kubernetes.io/docs/user-guide/compute-resources/ #}
+          requests:
+            cpu: {{ requests_cpu }}
+            memory: {{ requests_memory }}
+          limits:
+            cpu: {{ limits_cpu }}
+            memory: {{ limits_memory }}
+        env:  {# Вот тут можно указать нужные ENV переменные для приложения #}
+        - name: JOB_ID {# Используется, чтобы обновлялись поды при том же image #}
+          value: "{{ job_id }}"
